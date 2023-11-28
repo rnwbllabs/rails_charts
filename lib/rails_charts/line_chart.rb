@@ -39,15 +39,12 @@ module RailsCharts
         }
       when Hash
         data.map do |e|
-          {
+          options = {
             data: e[:data].is_a?(Hash) ? e[:data].values : e[:data],
             type: type,
-            name: e[:name],
-            yAxisIndex: e[:yAxisIndex]? e[:yAxisIndex] : 0,
-            stack: e[:stack].presence || nil,
-            areaStyle: e[:areaStyle] == {} ? {} : nil,
-            emphasis: e[:emphasis].presence || nil,
+            name: e[:name]
           }
+          options.merge!(e.reject { |k, _| options.key?(k)})
         end
       end
     end

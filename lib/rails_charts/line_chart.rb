@@ -45,6 +45,7 @@ module RailsCharts
             name: e[:name]
           }
           options.merge!(e.reject { |k, _| options.key?(k)})
+          options
         end
       end
     end

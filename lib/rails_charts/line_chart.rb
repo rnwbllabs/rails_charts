@@ -38,12 +38,13 @@ module RailsCharts
           type: type,
         }
       when Hash
-        data.map do |e| 
-          {
+        data.map do |e|
+          options = {
             data: e[:data].is_a?(Hash) ? e[:data].values : e[:data],
             type: type,
             name: e[:name]
           }
+          options.merge!(e.reject { |k, _| options.key?(k)})
         end
       end
     end
@@ -56,6 +57,9 @@ module RailsCharts
     end
 
     def y_axis
+      if options[:yAxis]
+        return options[:yAxis]
+      end
       {
         type: 'value',
       }
@@ -68,10 +72,22 @@ module RailsCharts
         },
         toolbox: {
           feature: {
-            saveAsImage: {}
+            saveAsImage: {show: false}
           },
         }
       }
+    end
+
+    def legend_options
+      legend_options = if options[:legend].present?
+        options[:legend]
+      else
+        {
+          bottom: 0,
+          padding: 0,
+        }
+      end
+      { legend: legend_options }
     end
 
   end

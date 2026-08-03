@@ -51,8 +51,10 @@ module RailsCharts
 
             var listeners = [];
             var chartDom;
+            var resizeObserver;
             var listenerController = {
               abort: function() {
+                disconnectResizeObserver();
                 while (listeners.length) {
                   var listener = listeners.pop();
                   listener[0].removeEventListener(listener[1], listener[2]);
@@ -64,6 +66,25 @@ module RailsCharts
             function listen(target, eventName, callback) {
               target.addEventListener(eventName, callback);
               listeners.push([target, eventName, callback]);
+            }
+
+            function resizeChart() {
+              var chart = window.RailsCharts.charts[containerId];
+              chart && chart.resize();
+            }
+
+            function observeChartResize() {
+              if (resizeObserver || !chartDom || typeof window.ResizeObserver !== "function") return;
+
+              resizeObserver = new window.ResizeObserver(resizeChart);
+              resizeObserver.observe(chartDom);
+            }
+
+            function disconnectResizeObserver() {
+              if (!resizeObserver) return;
+
+              resizeObserver.disconnect();
+              resizeObserver = undefined;
             }
 
             function chartLibrary() {
@@ -94,9 +115,12 @@ module RailsCharts
               }
 
               window.RailsCharts.charts[containerId] = chart;
+              observeChartResize();
             }
 
             function disposeChart() {
+              disconnectResizeObserver();
+
               var ownedChartDom = chartDom || document.getElementById(containerId);
               var lib = chartLibrary();
               var chart = window.RailsCharts.charts[containerId];
@@ -136,6 +160,7 @@ module RailsCharts
               if (chartDom && event.target.contains(chartDom)) destroy();
             }
 
+            if (typeof window.ResizeObserver !== "function") listen(window, 'resize', resizeChart);
             listen(window, 'load', init);
             listen(window, 'turbo:load', init);
             listen(window, 'turbolinks:load', init);

@@ -48,14 +48,16 @@ class FakeEventTarget {
   }
 }
 
-function createHarness() {
+function createHarness({ supportsResizeObserver = true } = {}) {
   const browserWindow = new FakeEventTarget();
   const browserDocument = new FakeEventTarget();
   const connectedElements = new Set();
   const instances = new WeakMap();
+  const resizeObservers = [];
   let chartElement = createChartElement();
   let initializationCount = 0;
   let disposalCount = 0;
+  let resizeCount = 0;
 
   connectedElements.add(chartElement);
 
@@ -68,6 +70,28 @@ function createHarness() {
     return connectedElements.has(chartElement) ? chartElement : null;
   };
 
+  if (supportsResizeObserver) {
+    browserWindow.ResizeObserver = class {
+      constructor(callback) {
+        this.callback = callback;
+        this.element = undefined;
+        resizeObservers.push(this);
+      }
+
+      observe(element) {
+        this.element = element;
+      }
+
+      disconnect() {
+        this.element = undefined;
+      }
+
+      trigger() {
+        if (this.element) this.callback([{ target: this.element }], this);
+      }
+    };
+  }
+
   browserWindow.echarts = {
     getInstanceByDom: (element) => instances.get(element),
     init: (element) => {
@@ -77,6 +101,9 @@ function createHarness() {
       const chart = {
         setOption: () => {},
         on: () => {},
+        resize: () => {
+          resizeCount += 1;
+        },
         dispose: () => {
           disposalCount += 1;
           element.innerHTML = '';
@@ -114,9 +141,19 @@ function createHarness() {
     get disposalCount() {
       return disposalCount;
     },
+    get activeResizeObserverCount() {
+      return resizeObservers.filter((observer) => observer.element).length;
+    },
     get initializationCount() {
       return initializationCount;
     },
+    get resizeCount() {
+      return resizeCount;
+    },
+    get resizeObserverCount() {
+      return resizeObservers.length;
+    },
+    triggerResizeObservers: () => resizeObservers.forEach((observer) => observer.trigger()),
   };
 }
 
@@ -131,14 +168,24 @@ function createChartElement() {
   harness.browserWindow.dispatch('load');
   assert.equal(harness.initializationCount, 1, 'the first load initializes without AbortController');
   assert.equal(harness.chartElement.innerHTML, '', 'the ECharts double clears its owned element');
+  assert.equal(harness.activeResizeObserverCount, 1, 'the chart container is observed after initialization');
+
+  harness.triggerResizeObservers();
+  assert.equal(harness.resizeCount, 1, 'a container resize resizes the existing chart');
 
   harness.browserWindow.dispatch('turbo:load');
   assert.equal(harness.initializationCount, 1, 'later load events reuse the existing chart instance');
+  assert.equal(harness.resizeObserverCount, 1, 'later load events reuse the existing resize observer');
 
   harness.activateScript();
   assert.equal(harness.browserWindow.listenerCount('turbo:load'), 1, 'reevaluation replaces stale listeners');
+  assert.equal(harness.activeResizeObserverCount, 0, 'reevaluation disconnects the stale resize observer');
   harness.browserWindow.dispatch('turbo:load');
   assert.equal(harness.initializationCount, 1, 'reevaluation reuses the existing chart instance');
+  assert.equal(harness.activeResizeObserverCount, 1, 'reevaluation observes the retained chart once');
+
+  harness.triggerResizeObservers();
+  assert.equal(harness.resizeCount, 2, 'only the replacement observer resizes the retained chart');
 }
 
 {
@@ -153,6 +200,7 @@ function createChartElement() {
 
   harness.browserDocument.dispatch('turbo:before-frame-render', harness.containingFrame);
   assert.equal(harness.disposalCount, 1, 'replacing the containing frame disposes the chart');
+  assert.equal(harness.activeResizeObserverCount, 0, 'replacing the containing frame disconnects its observer');
   assert.equal(harness.browserWindow.RailsCharts.charts['lifecycle-chart'], undefined);
   assert.equal(harness.browserWindow.RailsCharts.listenerControllers['lifecycle-chart'], undefined);
 
@@ -171,6 +219,7 @@ function createChartElement() {
   harness.activateScript();
   harness.browserWindow.dispatch('load');
   harness.browserDocument.dispatch('turbo:before-cache');
+  assert.equal(harness.activeResizeObserverCount, 0, 'cache preparation disconnects the resize observer');
   harness.browserDocument.dispatch('turbo:before-render');
   assert.equal(harness.disposalCount, 1, 'a promoted frame visit disposes the chart once');
   assert.equal(
@@ -182,6 +231,7 @@ function createChartElement() {
   harness.browserDocument.dispatch('turbo:render');
   harness.browserWindow.dispatch('turbo:load');
   assert.equal(harness.initializationCount, 2, 'a promoted frame visit reinitializes after its no-render page visit');
+  assert.equal(harness.activeResizeObserverCount, 1, 'a promoted frame visit observes the reinitialized chart');
 }
 
 {
@@ -229,4 +279,24 @@ function createChartElement() {
   harness.browserWindow.dispatch('turbolinks:load');
   assert.equal(harness.disposalCount, 1, 'Turbolinks cache preparation disposes the chart');
   assert.equal(harness.initializationCount, 2, 'Turbolinks reinitializes a preserved chart after rendering');
+}
+
+{
+  const harness = createHarness({ supportsResizeObserver: false });
+
+  harness.activateScript();
+  harness.browserWindow.dispatch('load');
+  assert.equal(harness.browserWindow.listenerCount('resize'), 1, 'older browsers register one resize fallback');
+
+  harness.browserWindow.dispatch('resize');
+  assert.equal(harness.resizeCount, 1, 'the window resize fallback resizes the existing chart');
+
+  harness.activateScript();
+  assert.equal(harness.browserWindow.listenerCount('resize'), 1, 'reevaluation replaces the resize fallback');
+
+  harness.browserWindow.dispatch('resize');
+  assert.equal(harness.resizeCount, 2, 'the replacement fallback resizes the retained chart');
+
+  harness.browserDocument.dispatch('turbo:before-frame-render', harness.containingFrame);
+  assert.equal(harness.browserWindow.listenerCount('resize'), 0, 'frame replacement retires the resize fallback');
 }

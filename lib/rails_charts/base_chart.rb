@@ -163,6 +163,11 @@ module RailsCharts
             if (typeof window.ResizeObserver !== "function") listen(window, 'resize', resizeChart);
             listen(window, 'load', init);
             listen(window, 'turbo:load', init);
+            // Turbo caches a snapshot on same-document navigations (e.g. a data-turbo="false"
+            // anchor click), firing turbo:before-cache — which disposes the chart — without any
+            // visit, so no turbo:load follows. Re-init on hashchange; init is a no-op when the
+            // chart is alive.
+            listen(window, 'hashchange', init);
             listen(window, 'turbolinks:load', init);
             listen(document, 'turbo:frame-render', initAfterFrameRender);
             listen(document, 'turbo:before-frame-render', destroyBeforeFrameRender);
